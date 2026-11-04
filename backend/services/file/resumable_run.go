@@ -47,8 +47,30 @@ func uploadMessageIsOwn(msg tgclient.HistoryMessage, actorID int64) bool {
 	return actorID > 0 && (msg.FromID == actorID || (msg.FromID == 0 && msg.Outgoing))
 }
 
+func uploadJobSenderID(job uploadJob) int64 {
+	if job.SenderID > 0 {
+		return job.SenderID
+	}
+	return job.ActorID
+}
+
 func (s *Service) startResumableUpload(ctx context.Context, uploadID int, sourcePath, name string, size int64, parent string, channelID int64, peer tgclient.InputPeer, observer uploadObserver) (Metadata, projection.Op, string, error) {
-	if !supportsIdempotentSends(s.TG) {
+	bodyTG, bodyPeer, senderBotID, senderID := s.TG, peer, "", int64(0)
+	var err error
+	selected, usingBot := botTransferFrom(ctx)
+	if usingBot {
+		bodyTG, bodyPeer, senderBotID = selected.client, selected.peer, selected.id
+		senderID, err = selected.client.SelfID(ctx)
+		if err != nil {
+			return Metadata{}, projection.Op{}, "", fmt.Errorf("identify transfer bot: %w", err)
+		}
+	} else {
+		senderID, err = s.ActorID(ctx)
+	}
+	if err != nil {
+		return Metadata{}, projection.Op{}, "", err
+	}
+	if !supportsIdempotentSends(bodyTG) {
 		return Metadata{}, projection.Op{}, "", fmt.Errorf("resumable upload requires Telegram idempotent sends")
 	}
 	plan, err := s.buildResumablePartPlan(size)
@@ -59,12 +81,12 @@ func (s *Service) startResumableUpload(ctx context.Context, uploadID int, source
 	if err != nil {
 		return Metadata{}, projection.Op{}, "", err
 	}
-	job, err := s.createUploadJob(ctx, sourcePath, name, parent, size, channelID, actorID, plan, peer)
+	job, err := s.createUploadJob(ctx, sourcePath, name, parent, size, channelID, actorID, senderBotID, senderID, plan, peer)
 	if err != nil {
 		return Metadata{}, projection.Op{}, "", err
 	}
 	s.emitUploadJob(ctx, job, &uploadID)
-	meta, err := s.runResumableUpload(ctx, job, sourcePath, peer, observer, &uploadID)
+	meta, err := s.runResumableUpload(ctx, job, sourcePath, peer, bodyTG, bodyPeer, observer, &uploadID)
 	if err != nil {
 		err = errors.Join(errUploadResumable, err)
 	}
@@ -118,9 +140,6 @@ func (s *Service) ResumeUpload(ctx context.Context, expectedChannelID int64, job
 	if s.TG == nil || s.Peers == nil || s.ActorID == nil {
 		return Metadata{}, fmt.Errorf("upload service not ready")
 	}
-	if !supportsIdempotentSends(s.TG) {
-		return Metadata{}, fmt.Errorf("resumable upload requires Telegram idempotent sends")
-	}
 	actorID, err := s.ActorID(ctx)
 	if err != nil {
 		return Metadata{}, err
@@ -140,10 +159,25 @@ func (s *Service) ResumeUpload(ctx context.Context, expectedChannelID int64, job
 		return Metadata{}, err
 	}
 	defer release()
-	return s.runResumableUpload(ctx, job, sourcePath, peer, detailedUploadObserver{service: s}, nil)
+	bodyTG, bodyPeer := s.TG, peer
+	if job.SenderBotID != "" {
+		if s.Bots == nil {
+			return Metadata{}, fmt.Errorf("the bot used by this upload is no longer configured")
+		}
+		var release func()
+		bodyTG, bodyPeer, release, err = s.Bots.SelectBot(ctx, job.ChannelID, job.SenderBotID)
+		if err != nil {
+			return Metadata{}, fmt.Errorf("restore upload bot session: %w", err)
+		}
+		defer release()
+	}
+	if !supportsIdempotentSends(bodyTG) {
+		return Metadata{}, fmt.Errorf("resumable upload requires Telegram idempotent sends")
+	}
+	return s.runResumableUpload(ctx, job, sourcePath, peer, bodyTG, bodyPeer, detailedUploadObserver{service: s}, nil)
 }
 
-func (s *Service) runResumableUpload(ctx context.Context, job uploadJob, sourcePath string, peer tgclient.InputPeer, observer uploadObserver, uploadID *int) (Metadata, error) {
+func (s *Service) runResumableUpload(ctx context.Context, job uploadJob, sourcePath string, peer tgclient.InputPeer, bodyTG tgclient.Client, bodyPeer tgclient.InputPeer, observer uploadObserver, uploadID *int) (Metadata, error) {
 	if job.ID == "" || job.ChannelID == 0 || job.ActorID <= 0 || job.Size <= 0 || job.PartSize <= 0 || job.PartCount < 2 || job.PartCount > MaxParts || job.Hash == "" || len(job.PartHashes) != job.PartCount {
 		return Metadata{}, fmt.Errorf("invalid resumable upload job")
 	}
@@ -267,7 +301,7 @@ func (s *Service) runResumableUpload(ctx context.Context, job uploadJob, sourceP
 			}
 			h := sha256.New()
 			sink := &partHashWriter{writer: h, limit: length}
-			result, err = tgclient.SendFileIdempotent(runCtx, s.TG, peer,
+			result, err = tgclient.SendFileIdempotent(runCtx, bodyTG, bodyPeer,
 				io.TeeReader(io.LimitReader(f, length), sink),
 				partAttachmentName(job.Name, i, job.PartCount), caption, length,
 				func(sent, _ int64) {
@@ -300,7 +334,7 @@ func (s *Service) runResumableUpload(ctx context.Context, job uploadJob, sourceP
 		if s.afterVisiblePartSend != nil {
 			s.afterVisiblePartSend(i, result.MsgID)
 		}
-		if _, err := projection.ProjectFromOp(s.DB, job.ChannelID, result.MsgID, partOp, job.ActorID, caption); err != nil {
+		if _, err := projection.ProjectFromOp(s.DB, job.ChannelID, result.MsgID, partOp, uploadJobSenderID(job), caption); err != nil {
 			return fail(resumeUncertain, fmt.Errorf("record part %d: %w", i, err))
 		}
 		parts = append(parts, projection.FilePart{PartIndex: i, MsgID: result.MsgID, Size: length})
@@ -386,11 +420,11 @@ func (s *Service) reconcileUploadMessages(ctx context.Context, job uploadJob, pe
 			if err != nil || op.UploadUUID != job.ID {
 				continue
 			}
-			if !uploadMessageIsOwn(msg, job.ActorID) {
-				return nil, 0, fmt.Errorf("upload message %d belongs to another sender", msg.MsgID)
-			}
 			switch op.Type {
 			case projection.OpFilePart:
+				if !uploadMessageIsOwn(msg, uploadJobSenderID(job)) {
+					return nil, 0, fmt.Errorf("upload part %d belongs to another sender", msg.MsgID)
+				}
 				if op.PartIndex < 0 || op.PartIndex >= job.PartCount || !msg.HasMedia {
 					return nil, 0, fmt.Errorf("invalid remote part for upload")
 				}
@@ -404,6 +438,9 @@ func (s *Service) reconcileUploadMessages(ctx context.Context, job uploadJob, pe
 				}
 				seenParts[op.PartIndex] = msg
 			case projection.OpFileManifest:
+				if !uploadMessageIsOwn(msg, job.ActorID) {
+					return nil, 0, fmt.Errorf("upload manifest %d belongs to another sender", msg.MsgID)
+				}
 				if op.Parent != job.Parent || op.Name != job.Name || op.FileSize != job.Size ||
 					op.PartCount != job.PartCount || op.FileUploadTime != job.UploadTime {
 					return nil, 0, fmt.Errorf("remote manifest does not match job")
@@ -447,7 +484,7 @@ func (s *Service) reconcileUploadMessages(ctx context.Context, job uploadJob, pe
 			}
 		}
 		op := projection.Op{Type: projection.OpFilePart, UploadUUID: job.ID, PartIndex: i, FileSize: size}
-		if _, err := projection.ProjectFromOp(s.DB, job.ChannelID, msg.MsgID, op, job.ActorID, projection.Format(op)); err != nil {
+		if _, err := projection.ProjectFromOp(s.DB, job.ChannelID, msg.MsgID, op, uploadJobSenderID(job), projection.Format(op)); err != nil {
 			return nil, 0, fmt.Errorf("project recovered part: %w", err)
 		}
 		projected = append(projected, projection.FilePart{PartIndex: i, MsgID: msg.MsgID, Size: size})
@@ -508,7 +545,7 @@ func (s *Service) verifiedCancelIDs(ctx context.Context, job uploadJob, peer tgc
 			if parseErr != nil || op.Type != projection.OpFilePart || op.UploadUUID != job.ID ||
 				op.PartIndex != part.PartIndex || op.FileSize != part.Size || !msg.HasMedia ||
 				msg.MediaSize != part.Size || msg.DocumentName != partAttachmentName(job.Name, part.PartIndex, job.PartCount) ||
-				!uploadMessageIsOwn(msg, job.ActorID) {
+				!uploadMessageIsOwn(msg, uploadJobSenderID(job)) {
 				return nil, fmt.Errorf("saved part message %d no longer belongs to this upload", msg.MsgID)
 			}
 			ids = append(ids, msg.MsgID)

@@ -61,7 +61,21 @@ func (s *Service) WarmTransport(ctx context.Context, channelID int64) {
 		slog.Debug("media: transport warm could not resolve the peer", "channel_id", channelID, "error", err)
 		return
 	}
-	refs, err := s.resolveSegments(ctx, peer, segments)
+	ranges := s.ranges
+	if s.selectTransfer != nil {
+		selectedRanges, selectedPeer, release, selectErr := s.selectTransfer(ctx, channelID)
+		if selectErr != nil {
+			slog.Debug("media: transport warm could not select transfer account", "channel_id", channelID, "error", selectErr)
+			return
+		}
+		if selectedRanges != nil {
+			if release != nil {
+				defer release()
+			}
+			ranges, peer = selectedRanges, selectedPeer
+		}
+	}
+	refs, err := s.resolveSegments(ctx, ranges, peer, segments)
 	if err != nil {
 		slog.Debug("media: transport warm could not resolve the documents", "channel_id", channelID, "error", err)
 		return
@@ -77,7 +91,7 @@ func (s *Service) WarmTransport(ctx context.Context, channelID int64) {
 	var wg sync.WaitGroup
 	for dc, ref := range perDC {
 		wg.Go(func() {
-			reads := s.warmPool(ctx, ref)
+			reads := s.warmPool(ctx, ranges, ref)
 			slog.Info("media: transport warmed", "channel_id", channelID, "dc", dc, "reads", reads, "elapsed", time.Since(started))
 		})
 	}
@@ -87,7 +101,7 @@ func (s *Service) WarmTransport(ctx context.Context, channelID int64) {
 // warmPool issues one tiny read per pooled connection, at distinct aligned
 // offsets so a small file still yields as many reads as it has room for, and
 // reports how many it made.
-func (s *Service) warmPool(ctx context.Context, ref tgclient.DocumentRef) int {
+func (s *Service) warmPool(ctx context.Context, ranges tgclient.RangeClient, ref tgclient.DocumentRef) int {
 	var wg sync.WaitGroup
 	reads := 0
 	for i := range tgclient.MediaPoolSize {
@@ -98,7 +112,7 @@ func (s *Service) warmPool(ctx context.Context, ref tgclient.DocumentRef) int {
 		size := int(min(int64(warmReadBytes), ref.Size-offset))
 		reads++
 		wg.Go(func() {
-			if _, err := s.ranges.ReadDocumentRange(ctx, ref, offset, make([]byte, size)); err != nil {
+			if _, err := ranges.ReadDocumentRange(ctx, ref, offset, make([]byte, size)); err != nil {
 				slog.Debug("media: transport warm read failed", "dc", ref.DCID, "offset", offset, "error", err)
 			}
 		})

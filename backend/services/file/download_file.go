@@ -97,7 +97,7 @@ func (s *Service) downloadSinglePlain(
 		if err := destination.Truncate(0); err != nil {
 			return downloadDiskError{err: fmt.Errorf("truncate download target: %w", err)}
 		}
-		return s.TG.DownloadFileAt(ctx, peer, messageID, destination, 0, progress)
+		return s.transferTG(ctx).DownloadFileAt(ctx, peer, messageID, destination, 0, progress)
 	})
 	return classifyFileDownloadError(err)
 }
@@ -127,7 +127,7 @@ func (s *Service) downloadSingleEncrypted(
 		if err := cipher.Truncate(0); err != nil {
 			return downloadDiskError{err: fmt.Errorf("truncate ciphertext target: %w", err)}
 		}
-		return s.TG.DownloadFileAt(ctx, peer, messageID, cipher, 0, progress)
+		return s.transferTG(ctx).DownloadFileAt(ctx, peer, messageID, cipher, 0, progress)
 	})
 	if err := classifyFileDownloadError(err); err != nil {
 		return err
@@ -238,7 +238,7 @@ func (s *Service) downloadPlainPart(
 		if err := partTmp.Truncate(0); err != nil {
 			return downloadDiskError{err: fmt.Errorf("truncate part target: %w", err)}
 		}
-		return s.TG.DownloadFileAt(ctx, peer, part.MsgID, partTmp, 0, func(done, _ int64) {
+		return s.transferTG(ctx).DownloadFileAt(ctx, peer, part.MsgID, partTmp, 0, func(done, _ int64) {
 			progress(done)
 		})
 	})
@@ -327,7 +327,7 @@ func (s *Service) downloadEncryptedPartsOrdered(
 			if err := partTmp.Truncate(0); err != nil {
 				return downloadDiskError{err: fmt.Errorf("truncate part target: %w", err)}
 			}
-			return s.TG.DownloadFileAt(ctx, peer, part.MsgID, partTmp, 0, func(done, _ int64) {
+			return s.transferTG(ctx).DownloadFileAt(ctx, peer, part.MsgID, partTmp, 0, func(done, _ int64) {
 				done = min(max(done, 0), part.Size)
 				reportedMu.Lock()
 				defer reportedMu.Unlock()

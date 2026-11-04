@@ -107,6 +107,7 @@ type EventSink interface {
 type Service struct {
 	DB                   *sql.DB
 	TG                   tgclient.Client
+	Bots                 BotTransferSelector
 	Peers                PeerResolver
 	EmitOp               EmitOpFunc
 	EmitOpContext        EmitOpContextFunc
@@ -600,11 +601,19 @@ func (s *Service) withPreviewSession(ctx context.Context, channelID int64, fn fu
 	if err != nil {
 		return errPreviewDownloadFailed
 	}
+	if s.Bots != nil {
+		botClient, botPeer, botID, release, botErr := s.Bots.Select(ctx, channelID)
+		if botErr == nil {
+			defer release()
+			peer = botPeer
+			ctx = withBotTransfer(ctx, selectedBotTransfer{client: botClient, peer: botPeer, id: botID, release: release})
+		}
+	}
 	return fn(ctx, peer, channelID)
 }
 
 func (s *Service) loadPreviewDocument(ctx context.Context, peer tgclient.InputPeer, channelID int64, msgID int) (tgclient.FileDocument, string, string, error) {
-	doc, err := s.TG.GetFileDocument(ctx, peer, int64(msgID))
+	doc, err := s.transferTG(ctx).GetFileDocument(ctx, peer, int64(msgID))
 	if err != nil {
 		if errors.Is(err, tgclient.ErrMessageNotFound) || errors.Is(err, tgclient.ErrNotFile) || errors.Is(err, tgclient.ErrEmptyDocument) {
 			return tgclient.FileDocument{}, "", "", errPreviewNotFound

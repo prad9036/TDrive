@@ -87,6 +87,14 @@ func (s *Service) DownloadFolder(
 		if err != nil {
 			return folderDownloadFailure(ctx, fmt.Errorf("Error: %w", err))
 		}
+		if s.Bots != nil {
+			botClient, botPeer, botID, release, botErr := s.Bots.Select(ctx, channelID)
+			if botErr == nil {
+				defer release()
+				peer = botPeer
+				ctx = withBotTransfer(ctx, selectedBotTransfer{client: botClient, peer: botPeer, id: botID, release: release})
+			}
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return folderDownloadFailure(ctx, err)

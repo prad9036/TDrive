@@ -66,6 +66,15 @@ func (s *Service) uploadBackup(ctx context.Context, channelID int64, path, paren
 	if err != nil {
 		return Metadata{}, err
 	}
+	if s.Bots != nil {
+		botClient, botPeer, botID, release, botErr := s.Bots.Select(ctx, channelID)
+		if botErr == nil {
+			defer release()
+			ctx = withBotTransfer(ctx, selectedBotTransfer{client: botClient, peer: botPeer, id: botID})
+		} else if ctx.Err() != nil {
+			return Metadata{}, ctx.Err()
+		}
+	}
 	var reservation *backupRenditionReservation
 	if worker != nil && encrypt && thumbnail.IsImage(path) {
 		info, err := os.Stat(path)

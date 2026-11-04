@@ -23,11 +23,12 @@ export const driveSwitcherOpen = writable(false);
  * the whole tab with its title and a back button in the top bar. The state lives
  * here so the top bar and the Account tab read the same value.
  */
-export type AccountDetail = 'appearance' | 'backup';
+export type AccountDetail = 'appearance' | 'backup' | 'transfer-bots';
 
 export const ACCOUNT_DETAIL_TITLES: Record<AccountDetail, string> = {
     appearance: 'Appearance',
     backup: 'Photo & video backup',
+    'transfer-bots': 'Transfer bots',
 };
 
 export const accountDetail = writable<AccountDetail | null>(null);

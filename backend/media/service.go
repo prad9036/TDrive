@@ -22,6 +22,9 @@ type Config struct {
 	DB     *sql.DB
 	Peers  PeerResolver
 	Ranges tgclient.RangeClient
+	// SelectTransfer pins a file-transfer account and its channel peer for the
+	// lifetime of a streaming session. Nil means use the primary account.
+	SelectTransfer func(context.Context, int64) (tgclient.RangeClient, tgclient.InputPeer, func(), error)
 	// RawDrive and AccountID enable read-only previews of loose drive attachments.
 	RawDrive  RawDriveSource
 	AccountID func(context.Context) (int64, error)
@@ -43,26 +46,28 @@ type Config struct {
 // Service is the app-facing media entry point. It owns logical file resolution
 // and loopback sessions; UI-specific players sit above it.
 type Service struct {
-	peers         PeerResolver
-	ranges        tgclient.RangeClient
-	resolveRetry  tgclient.FloodWaitRetryPolicy
-	keys          MasterKeyProvider
-	encGate       sync.Locker
-	encGeneration func() uint64
-	thumbs        *thumbnail.Cache
-	thumbGen      VideoThumbnailGenerator
-	imageLimits   ImageAdmissionLimits
-	imagePreview  func(context.Context, LogicalFile) ([]byte, error)
-	resolver      *Resolver
-	rawDrive      RawDriveSource
-	accountID     func(context.Context) (int64, error)
-	server        *Server
+	peers          PeerResolver
+	ranges         tgclient.RangeClient
+	selectTransfer func(context.Context, int64) (tgclient.RangeClient, tgclient.InputPeer, func(), error)
+	resolveRetry   tgclient.FloodWaitRetryPolicy
+	keys           MasterKeyProvider
+	encGate        sync.Locker
+	encGeneration  func() uint64
+	thumbs         *thumbnail.Cache
+	thumbGen       VideoThumbnailGenerator
+	imageLimits    ImageAdmissionLimits
+	imagePreview   func(context.Context, LogicalFile) ([]byte, error)
+	resolver       *Resolver
+	rawDrive       RawDriveSource
+	accountID      func(context.Context) (int64, error)
+	server         *Server
 }
 
 func NewService(cfg Config) *Service {
 	s := &Service{
-		peers:  cfg.Peers,
-		ranges: cfg.Ranges,
+		peers:          cfg.Peers,
+		ranges:         cfg.Ranges,
+		selectTransfer: cfg.SelectTransfer,
 		resolveRetry: tgclient.FloodWaitRetryPolicy{
 			MaxRetries: 2, MaxWait: 30 * time.Second, MaxTotalWait: time.Minute,
 		},
@@ -210,12 +215,31 @@ func (s *Service) open(ctx context.Context, channelID, fileID int64, requiredKin
 	if err != nil {
 		return OpenResult{}, fmt.Errorf("media: resolve peer: %w", err)
 	}
-	refs, err := s.resolveSegments(ctx, peer, file.Segments)
-	if err != nil && stalePeerError(err) {
+	ranges := s.ranges
+	var transferRelease func()
+	transferOwned := false
+	usingTransferBot := false
+	defer func() {
+		if !transferOwned && transferRelease != nil {
+			transferRelease()
+		}
+	}()
+	if s.selectTransfer != nil {
+		selectedRanges, selectedPeer, release, selectErr := s.selectTransfer(ctx, channelID)
+		if selectErr != nil {
+			return OpenResult{}, fmt.Errorf("media: select transfer bot: %w", selectErr)
+		}
+		if selectedRanges != nil {
+			ranges, peer, transferRelease = selectedRanges, selectedPeer, release
+			usingTransferBot = true
+		}
+	}
+	refs, err := s.resolveSegments(ctx, ranges, peer, file.Segments)
+	if err != nil && stalePeerError(err) && !usingTransferBot {
 		if refresher, ok := s.peers.(peerRefresher); ok {
 			peer, err = refresher.RefreshPeer(ctx, channelID)
 			if err == nil {
-				refs, err = s.resolveSegments(ctx, peer, file.Segments)
+				refs, err = s.resolveSegments(ctx, ranges, peer, file.Segments)
 			}
 		}
 	}
@@ -265,10 +289,11 @@ func (s *Service) open(ctx context.Context, channelID, fileID int64, requiredKin
 		}
 	}
 
-	session, err := newSession(file, segments, s.ranges, s.thumbs, s.thumbGen, SessionOptions{
+	session, err := newSession(file, segments, ranges, s.thumbs, s.thumbGen, SessionOptions{
 		Context:               ctx,
 		EnableVideoThumbnails: kind == StreamKindVideo,
 		MasterKey:             masterKey,
+		Release:               transferRelease,
 	})
 	if err != nil {
 		return OpenResult{}, err
@@ -296,6 +321,7 @@ func (s *Service) open(ctx context.Context, channelID, fileID int64, requiredKin
 		session.Close()
 		return OpenResult{}, err
 	}
+	transferOwned = transferRelease != nil
 	opened = true
 	return OpenResult{
 		Token:         session.Token(),
@@ -314,12 +340,12 @@ func (s *Service) open(ctx context.Context, channelID, fileID int64, requiredKin
 // resolveSegments maps projected segments to Telegram document refs. A client
 // that can batch answers for every part in one round trip; otherwise each part
 // is resolved in turn. Both honor FLOOD_WAIT through the open retry policy.
-func (s *Service) resolveSegments(ctx context.Context, peer tgclient.InputPeer, segments []Segment) ([]tgclient.DocumentRef, error) {
+func (s *Service) resolveSegments(ctx context.Context, ranges tgclient.RangeClient, peer tgclient.InputPeer, segments []Segment) ([]tgclient.DocumentRef, error) {
 	ids := make([]int64, len(segments))
 	for i, seg := range segments {
 		ids[i] = seg.MsgID
 	}
-	if batch, ok := s.ranges.(tgclient.DocumentBatchResolver); ok {
+	if batch, ok := ranges.(tgclient.DocumentBatchResolver); ok {
 		var refs []tgclient.DocumentRef
 		err := s.resolveRetry.Do(ctx, func() error {
 			var resolveErr error
@@ -339,7 +365,7 @@ func (s *Service) resolveSegments(ctx context.Context, peer tgclient.InputPeer, 
 		var ref tgclient.DocumentRef
 		err := s.resolveRetry.Do(ctx, func() error {
 			var resolveErr error
-			ref, resolveErr = s.ranges.ResolveDocument(ctx, peer, id)
+			ref, resolveErr = ranges.ResolveDocument(ctx, peer, id)
 			return resolveErr
 		})
 		if err != nil {

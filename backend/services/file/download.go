@@ -57,6 +57,16 @@ func (s *Service) Download(ctx context.Context, channelID int64, msgID int, look
 	if err != nil {
 		return DownloadResult{Status: "error", Message: "Error: " + err.Error(), Err: err}
 	}
+	if s.Bots != nil {
+		botClient, botPeer, botID, release, botErr := s.Bots.Select(ctx, channelID)
+		if botErr == nil {
+			defer release()
+			ctx = withBotTransfer(ctx, selectedBotTransfer{client: botClient, peer: botPeer, id: botID, release: release})
+			peer = botPeer
+		} else if ctx.Err() != nil {
+			return DownloadResult{Status: "canceled", Message: "Download canceled", Err: ctx.Err()}
+		}
+	}
 
 	// Check decryption readiness before opening the save dialog. Otherwise a
 	// locked vault makes the user choose a path and then repeat it after unlock.
@@ -161,7 +171,7 @@ func (s *Service) PreviewThumbnail(ctx context.Context, channelID int64, msgID i
 			// A fresh buffer each attempt so a retry never appends to a
 			// partially downloaded thumbnail.
 			var buf bytes.Buffer
-			if err := s.TG.DownloadFileThumbnail(ctx, peer, int64(msgID), thumbType, &buf); err != nil {
+			if err := s.transferTG(ctx).DownloadFileThumbnail(ctx, peer, int64(msgID), thumbType, &buf); err != nil {
 				return err
 			}
 			payloadBytes = buf.Bytes()
@@ -214,7 +224,7 @@ func (s *Service) PreviewFile(ctx context.Context, channelID int64, msgID int) (
 		var downloaded []byte
 		if err := s.sendRetryPolicy().Do(ctx, func() error {
 			var attempt bytes.Buffer
-			if err := s.TG.DownloadFile(ctx, peer, int64(msgID), &attempt, s.previewProgress(msgID, doc.Size)); err != nil {
+			if err := s.transferTG(ctx).DownloadFile(ctx, peer, int64(msgID), &attempt, s.previewProgress(msgID, doc.Size)); err != nil {
 				return err
 			}
 			downloaded = append(downloaded[:0], attempt.Bytes()...)

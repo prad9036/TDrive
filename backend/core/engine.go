@@ -145,6 +145,7 @@ type Engine struct {
 	active     *lifecycleservice.ActiveDrive
 	selfUserID atomic.Int64
 	thumbs     *thumbnail.Cache
+	bots       *botTransfers
 	maxUploads int
 	policySync func(context.Context, int64) error
 
@@ -183,6 +184,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		events:     cfg.Events,
 		warnf:      cfg.Warnf,
 		tg:         cfg.TG,
+		bots:       newBotTransfers(),
 		active:     lifecycleservice.NewActiveDrive(),
 		thumbs:     cfg.Thumbs,
 		maxUploads: cfg.MaxConcurrentUploads,
@@ -343,6 +345,9 @@ func (e *Engine) Close() {
 	if e != nil && e.media != nil {
 		_ = e.media.Close()
 	}
+	if e != nil && e.bots != nil {
+		e.bots.Close()
+	}
 	if e != nil && e.tg != nil {
 		e.tg.Close()
 	}
@@ -364,6 +369,52 @@ func (e *Engine) Telegram() tgclient.Client {
 		return nil
 	}
 	return e.tg
+}
+
+func (e *Engine) ListTransferBots() ([]auth.BotAccountInfo, error) {
+	return auth.ListBotAccounts()
+}
+
+func (e *Engine) AddTransferBot(ctx context.Context, name, token string) (auth.BotAccountInfo, error) {
+	info, err := auth.AddBotAccount(name, token)
+	if err != nil {
+		return auth.BotAccountInfo{}, err
+	}
+	if e == nil || e.bots == nil {
+		_ = auth.RemoveBotAccount(info.ID)
+		return auth.BotAccountInfo{}, fmt.Errorf("transfer bot manager is unavailable")
+	}
+	client, err := e.bots.client(info.ID)
+	if err == nil {
+		_, err = client.SelfID(ctx)
+	}
+	if err != nil {
+		e.bots.CloseBot(info.ID)
+		_ = auth.RemoveBotAccount(info.ID)
+		// gotd errors can include request details. Keep Telegram credentials and
+		// auth payloads out of the UI error path.
+		return auth.BotAccountInfo{}, fmt.Errorf("could not authenticate transfer bot; check the token and try again")
+	}
+	return info, nil
+}
+
+func (e *Engine) RemoveTransferBot(id string) error {
+	if e != nil && e.files != nil {
+		busy, err := e.files.HasRecoverableUploadsForBot(e.ctx, id)
+		if err != nil {
+			return err
+		}
+		if busy {
+			return fmt.Errorf("finish or cancel resumable uploads using this bot before removing it")
+		}
+	}
+	if err := auth.RemoveBotAccount(id); err != nil {
+		return err
+	}
+	if e != nil && e.bots != nil {
+		e.bots.CloseBot(id)
+	}
+	return nil
 }
 
 func (e *Engine) ActiveChannelID() int64 {
@@ -786,6 +837,7 @@ func (e *Engine) newFileService() *fileservice.Service {
 	return &fileservice.Service{
 		DB:    backend.DB,
 		TG:    e.tg,
+		Bots:  e.bots,
 		Peers: peerResolverFn(e.ResolvePeer),
 		EmitOp: func(channelID int64, op projection.Op) (int64, error) {
 			return e.EmitAndProject(channelID, op)
@@ -850,6 +902,26 @@ func (e *Engine) newMediaService() *media.Service {
 		RawDrive:  e.tg,
 		AccountID: e.ActorID,
 		Ranges:    ranges,
+		SelectTransfer: func(ctx context.Context, channelID int64) (tgclient.RangeClient, tgclient.InputPeer, func(), error) {
+			if e.bots == nil {
+				return nil, tgclient.InputPeer{}, nil, nil
+			}
+			client, peer, _, release, err := e.bots.Select(ctx, channelID)
+			if err == fileservice.ErrNoTransferBots {
+				return nil, tgclient.InputPeer{}, nil, nil
+			}
+			if err != nil {
+				// A drive may not include any configured transfer bot. Let the
+				// media service use the already-authenticated user range client.
+				return nil, tgclient.InputPeer{}, nil, nil
+			}
+			rangeClient, ok := client.(tgclient.RangeClient)
+			if !ok {
+				release()
+				return nil, tgclient.InputPeer{}, nil, fmt.Errorf("transfer bot does not support media range downloads")
+			}
+			return rangeClient, peer, release, nil
+		},
 		Keys: media.MasterKeyProviderFunc(func(ctx context.Context, channelID int64) ([]byte, error) {
 			if ctx == nil {
 				ctx = context.Background()

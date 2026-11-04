@@ -27,9 +27,10 @@ import (
 // it, instead of dialing a fresh connection per call. The scope starts lazily
 // on first use and is torn down by Close.
 type Gotd struct {
-	connect func() (*telegram.Client, error)
-	conn    *liveConn
-	writes  *writeCoordinator
+	connect   func() (*telegram.Client, error)
+	authorize func(context.Context, *telegram.Client) error
+	conn      *liveConn
+	writes    *writeCoordinator
 
 	mu     sync.Mutex
 	client *telegram.Client
@@ -48,8 +49,16 @@ type Gotd struct {
 // NewGotd constructs a Client that dispatches onto one shared connection built
 // from the given factory. In production wire this to auth.Connect.
 func NewGotd(connect func() (*telegram.Client, error)) *Gotd {
+	return NewGotdWithAuth(connect, nil)
+}
+
+// NewGotdWithAuth constructs a client that runs authorize on each connection
+// before publishing readiness. Bot clients use this to restore MTProto bot
+// authorization after a reconnect; user clients keep NewGotd's behavior.
+func NewGotdWithAuth(connect func() (*telegram.Client, error), authorize func(context.Context, *telegram.Client) error) *Gotd {
 	g := &Gotd{
 		connect:     connect,
+		authorize:   authorize,
 		cdn:         make(map[int]telegram.CloseInvoker),
 		pools:       make(map[int]telegram.CloseInvoker),
 		poolRetryAt: make(map[int]time.Time),
@@ -69,6 +78,11 @@ func (g *Gotd) scope(runCtx context.Context, ready func()) error {
 	}
 	return client.Run(runCtx, func(rctx context.Context) error {
 		defer g.closeMediaConns()
+		if g.authorize != nil {
+			if err := g.authorize(rctx, client); err != nil {
+				return fmt.Errorf("tgclient: authorize: %w", err)
+			}
+		}
 		g.mu.Lock()
 		g.client = client
 		g.mu.Unlock()
@@ -1056,6 +1070,47 @@ func (g *Gotd) ResolveDriveChannel(ctx context.Context, channelID int64) (InputP
 		}
 		peer = InputPeer{ChannelID: resolved.ChannelID, AccessHash: resolved.AccessHash}
 		return nil
+	})
+	return peer, err
+}
+
+// ResolveBotDriveChannel uses Telegram's bot-specific zero access hash. Bots
+// cannot enumerate dialogs, and access hashes from the user session cannot be
+// reused by a bot. Telegram documents zero hashes for bots that know a peer ID.
+// Fetching the channel also verifies that this bot is still a member.
+func (g *Gotd) ResolveBotDriveChannel(ctx context.Context, channelID int64) (InputPeer, error) {
+	if channelID <= 0 {
+		return InputPeer{}, fmt.Errorf("invalid channel id %d", channelID)
+	}
+	peer := InputPeer{ChannelID: channelID}
+	err := g.run(ctx, func(ctx context.Context, api *tg.Client) error {
+		result, err := api.ChannelsGetChannels(ctx, []tg.InputChannelClass{
+			&tg.InputChannel{ChannelID: channelID, AccessHash: 0},
+		})
+		if err != nil {
+			return fmt.Errorf("resolve bot channel %d: %w", channelID, err)
+		}
+		var channels []tg.ChatClass
+		switch chats := result.(type) {
+		case *tg.MessagesChats:
+			channels = chats.Chats
+		case *tg.MessagesChatsSlice:
+			channels = chats.Chats
+		}
+		for _, value := range channels {
+			channel, ok := value.(*tg.Channel)
+			if ok && channel.ID == channelID && !channel.Left {
+				// channels.getChannels accepts the bot's zero-hash bootstrap
+				// input, but subsequent peer operations need the account-specific
+				// hash returned in the channel constructor.
+				if channel.AccessHash == 0 {
+					return fmt.Errorf("Telegram returned no access hash for channel %d", channelID)
+				}
+				peer.AccessHash = channel.AccessHash
+				return nil
+			}
+		}
+		return fmt.Errorf("bot is not a member of channel %d", channelID)
 	})
 	return peer, err
 }

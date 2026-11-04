@@ -103,6 +103,38 @@ survive later errors or cancellation so reconciliation can protect accepted
 remote bodies. This recovery requires a live transfer context; it does not add
 restart persistence or extend Telegram's temporary uploaded-part lifetime.
 
+## MTProto bot transfer accounts
+
+The user phone session remains the owner of drive operations and visible TDrive
+records. Optional bot tokens create separate gotd MTProto sessions, stored under
+the private TDrive config directory. Bots are selected round-robin for a
+transfer. Since Telegram only lets user accounts enumerate dialogs, bots resolve
+channels with Telegram’s bot-specific zero access hash and validate membership
+with `channels.getChannels`; access hashes from the user session are never reused
+for bot sessions. A selected bot stays pinned for the transfer and retries. Removing a bot retires its live client after
+active transfers release it, and is rejected while resumable uploads still need
+that bot for recovery.
+
+Visible uploads send the document bodies as hidden `OpFilePart` messages from
+the selected bot, then publish the visible manifest through the user session.
+This keeps file ownership and namespace control messages attributed to the user.
+Durable resumable upload rows record both identities so history reconciliation
+can verify bot-sent parts while confirming the user-sent manifest. If the saved
+bot is removed or cannot access the drive, resume fails explicitly instead of
+retrying under a different Telegram identity.
+
+Single-file and folder downloads, preview fetches, and managed media playback
+can use an available transfer bot. Streaming holds the selected bot until the
+media session closes. Bots need access to the target drive; channel
+administrator permissions are required for posting and may be needed for
+history or cleanup. If no configured bot is a member of the channel, ordinary uploads and reads
+fall back to the primary user session. Durable resumable uploads remain pinned
+to the bot identity recorded in their journal, because switching identity could
+make their remote receipts ambiguous. No bot token is used for sync, drive discovery, metadata
+writes, or TDrive control messages. Durable mounted writes and rendition
+preparation still use the primary account because their receipt and cleanup
+journals do not yet persist a transfer-bot identity.
+
 ## Interactive upload queue and Activity
 
 The frontend's [upload queue](../../frontend/src/modules/upload-queue.ts)

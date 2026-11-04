@@ -54,6 +54,7 @@
     import { reloadJoinRequests, resolveRequest } from '../../modules/modals/join-requests';
     import { confirmLeaveDrive } from '../../modules/modals/leave-drive';
     import { confirmLogout } from '../../modules/modals/logout';
+    import { closeTextShareModal, retryLoadSavedMessagesDraft, submitSavedMessagesDraft } from '../../modules/modals/text-share';
     import {
         confirmMove,
         navigateMoveBack,
@@ -201,7 +202,11 @@
         <ShareDriveModal />
     </div>
     <div id="share-text-modal" class="modal-overlay" style="display: none;" aria-hidden="true">
-        <ShareTextModal />
+        <ShareTextModal
+            onClose={closeTextShareModal}
+            onRetry={retryLoadSavedMessagesDraft}
+            onSave={submitSavedMessagesDraft}
+        />
     </div>
     <div id="leave-drive-modal" class="modal-overlay" style="display: none;" aria-hidden="true">
         <LeaveDriveModal onConfirm={confirmLeaveDrive} />

@@ -10,6 +10,7 @@
     import LogOutIcon from '@lucide/svelte/icons/log-out';
     import PaletteIcon from '@lucide/svelte/icons/palette';
     import CloudUploadIcon from '@lucide/svelte/icons/cloud-upload';
+    import BotIcon from '@lucide/svelte/icons/bot';
     import Trash2Icon from '@lucide/svelte/icons/trash-2';
     import Avatar from '../chrome/Avatar.svelte';
     import { getStorageUsed } from '../../api';
@@ -18,6 +19,7 @@
     import { sidebarState } from '../sidebar/sidebar-store';
     import AppearancePanel from '../theme/AppearancePanel.svelte';
     import PhotoBackupPanel from '../gallery/PhotoBackupPanel.svelte';
+    import TransferBotsPanel from '../settings/TransferBotsPanel.svelte';
     import { getThemeDefinition } from '../theme/theme-model';
     import { themeState } from '../theme/theme-controller';
     import { handleDriveClick } from '../../modules/sidebar';
@@ -52,6 +54,7 @@
     // lives in the shell store so the top bar and this tab agree on it.
     let appearanceOpener = $state<HTMLButtonElement | null>(null);
     let backupOpener = $state<HTMLButtonElement | null>(null);
+    let botOpener = $state<HTMLButtonElement | null>(null);
     let scrollerEl = $state<HTMLElement | null>(null);
     let listScrollTop = 0;
     const currentThemeName = $derived(getThemeDefinition($themeState.resolvedThemeId).name);
@@ -96,7 +99,7 @@
         const onAccount = get(activeTab) === 'account';
         void tick().then(() => {
             if (scrollerEl) scrollerEl.scrollTop = top;
-            if (onAccount) (leaving === 'appearance' ? appearanceOpener : backupOpener)?.focus({ preventScroll: true });
+            if (onAccount) (leaving === 'appearance' ? appearanceOpener : leaving === 'backup' ? backupOpener : botOpener)?.focus({ preventScroll: true });
         });
     });
 
@@ -184,6 +187,8 @@
         <section class="account-detail" aria-label={ACCOUNT_DETAIL_TITLES[$accountDetail]}>
             {#if $accountDetail === 'appearance'}
                 <AppearancePanel autofocus />
+            {:else if $accountDetail === 'transfer-bots'}
+                <TransferBotsPanel />
             {:else}
                 <PhotoBackupPanel page />
             {/if}
@@ -281,6 +286,17 @@
                 <PaletteIcon class="account-row-icon" size={20} strokeWidth={1.9} aria-hidden="true" />
                 <span class="account-row-label">Appearance</span>
                 <span class="account-row-value">{currentThemeName}</span>
+                <ChevronRightIcon class="account-row-chevron" size={18} strokeWidth={2} aria-hidden="true" />
+            </button>
+        </div>
+    </section>
+
+    <section class="account-group" aria-label="Transfers">
+        <h2 class="mobile-section-label">Transfers</h2>
+        <div class="account-card">
+            <button bind:this={botOpener} type="button" class="account-row" onclick={() => openDetail('transfer-bots')}>
+                <BotIcon class="account-row-icon" size={20} strokeWidth={1.9} aria-hidden="true" />
+                <span class="account-row-label">Transfer bots</span>
                 <ChevronRightIcon class="account-row-chevron" size={18} strokeWidth={2} aria-hidden="true" />
             </button>
         </div>

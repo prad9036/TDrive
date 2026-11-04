@@ -34,7 +34,7 @@ build/android/app/build/
 build/android/build/
 build/android/.gradle/
 build/android/local.properties
-
+build/bot-test/
 # Downloaded by windows:installer; release packaging output.
 build/windows/installer/MicrosoftEdgeWebview2Setup.exe
 dist/

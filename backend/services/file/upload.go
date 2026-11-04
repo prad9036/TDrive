@@ -98,6 +98,17 @@ func (s *Service) upload(ctx context.Context, channelID int64, filePaths []strin
 		}
 		peer = &resolved
 	}
+	if s.Bots != nil {
+		botClient, botPeer, botID, release, botErr := s.Bots.Select(ctx, channelID)
+		if botErr == nil {
+			defer release()
+			ctx = withBotTransfer(ctx, selectedBotTransfer{client: botClient, peer: botPeer, id: botID})
+		} else if ctx.Err() != nil {
+			return nil, ctx.Err()
+		} else if !errors.Is(botErr, ErrNoTransferBots) {
+			slog.Info("file: transfer bot unavailable for drive; using user session", "channel_id", channelID, "error", botErr)
+		}
+	}
 	if slog.Default().Enabled(ctx, slog.LevelDebug) {
 		timings := &uploadBatchTimings{}
 		parentReporter := uploadTimingReporter(ctx)
@@ -307,6 +318,13 @@ func (s *Service) uploadVisibleSource(ctx context.Context, uploadID int, source 
 	storedSize, multipart, err := s.planUpload(filename, plaintextSize, wantEncrypted)
 	if err != nil {
 		return Metadata{}, projection.Op{}, "", err
+	}
+	_, usingBot := botTransferFrom(ctx)
+	// Keep bot-sent bodies hidden and let the user session publish the visible
+	// manifest. This keeps TDrive's owner identity and control-message semantics
+	// on the user session, even for files that would otherwise fit one message.
+	if usingBot {
+		multipart = true
 	}
 
 	masterKey, err := s.masterKeyForUpload(channelID, wantEncrypted)
@@ -518,13 +536,24 @@ func (s *Service) uploadMultipart(ctx context.Context, uploadID int, plainFile i
 	if err != nil {
 		return Metadata{}, projection.Op{}, "", err
 	}
+	bodyTG, bodyPeer, bodyActorID := s.TG, peer, actorID
+	if bot, ok := botTransferFrom(ctx); ok {
+		bodyTG, bodyPeer = bot.client, bot.peer
+		bodyActorID, err = bot.client.SelfID(ctx)
+		if err != nil {
+			return Metadata{}, projection.Op{}, "", fmt.Errorf("identify transfer bot: %w", err)
+		}
+		if bodyActorID <= 0 {
+			return Metadata{}, projection.Op{}, "", fmt.Errorf("transfer bot identity is unavailable")
+		}
+	}
 
 	plan, err := s.buildUploadPartPlan(storedSize)
 	if err != nil {
 		return Metadata{}, projection.Op{}, "", fmt.Errorf("%s: %w", filename, err)
 	}
 	numParts := plan.partCount
-	if !supportsIdempotentSends(s.TG) {
+	if !supportsIdempotentSends(bodyTG) {
 		return Metadata{}, projection.Op{}, "", fmt.Errorf("multipart upload requires Telegram idempotent sends")
 	}
 
@@ -567,7 +596,7 @@ func (s *Service) uploadMultipart(ctx context.Context, uploadID int, plainFile i
 		if len(partMsgIDs) > 0 {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			if err := s.deleteMessagesChunked(cleanupCtx, peer, partMsgIDs); err != nil {
+			if err := s.deleteMessagesChunkedWith(cleanupCtx, bodyTG, bodyPeer, partMsgIDs); err != nil {
 				// Couldn't delete the bodies now; queue them so a later sweep
 				// retries rather than leaking them. These parts have no manifest,
 				// so the tombstone-scoped sweep wouldn't otherwise see them.
@@ -650,8 +679,8 @@ func (s *Service) uploadMultipart(ctx context.Context, uploadID int, plainFile i
 			markBackupSendAttempt(ctx)
 			result, serr = tgclient.SendFileIdempotent(
 				ctx,
-				s.TG,
-				peer,
+				bodyTG,
+				bodyPeer,
 				io.LimitReader(partReader, partLen),
 				partAttachmentName(filename, i, numParts),
 				partCaption,
@@ -674,7 +703,7 @@ func (s *Service) uploadMultipart(ctx context.Context, uploadID int, plainFile i
 		// Track the sent part for cleanup before projecting it, so a projection
 		// failure here still deletes this part's body in abort().
 		partMsgIDs = append(partMsgIDs, result.MsgID)
-		if _, err := projection.ProjectFromOp(s.DB, channelID, result.MsgID, partOp, actorID, partCaption); err != nil {
+		if _, err := projection.ProjectFromOp(s.DB, channelID, result.MsgID, partOp, bodyActorID, partCaption); err != nil {
 			abort()
 			return Metadata{}, projection.Op{}, "", err
 		}
@@ -755,7 +784,11 @@ func (s *Service) uploadMultipart(ctx context.Context, uploadID int, plainFile i
 // encountered (nil if every chunk succeeded) so callers can decide whether to
 // drop the local file_parts pointers or keep them for a later retry.
 func (s *Service) deleteMessagesChunked(ctx context.Context, peer tgclient.InputPeer, msgIDs []int64) error {
-	if s.TG == nil || len(msgIDs) == 0 {
+	return s.deleteMessagesChunkedWith(ctx, s.TG, peer, msgIDs)
+}
+
+func (s *Service) deleteMessagesChunkedWith(ctx context.Context, client tgclient.Client, peer tgclient.InputPeer, msgIDs []int64) error {
+	if client == nil || len(msgIDs) == 0 {
 		return nil
 	}
 	const chunk = 100
@@ -765,7 +798,7 @@ func (s *Service) deleteMessagesChunked(ctx context.Context, peer tgclient.Input
 		end := min(start+chunk, len(msgIDs))
 		// Deleting already-deleted ids is a no-op, so transport retries are safe.
 		if err := policy.Do(ctx, func() error {
-			return s.TG.DeleteMessages(ctx, peer, msgIDs[start:end])
+			return client.DeleteMessages(ctx, peer, msgIDs[start:end])
 		}); err != nil {
 			s.warnf("warn: delete %d message bodies failed: %v\n", end-start, err)
 			if firstErr == nil {

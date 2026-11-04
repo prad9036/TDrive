@@ -10,6 +10,9 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as backend$0 from "../../backend/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as auth$0 from "../../backend/auth/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as galleryimage$0 from "../../backend/galleryimage/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -35,6 +38,13 @@ export function ActiveChannelID(): $CancellablePromise<number> {
  */
 export function AddPhotoBackupFolder(): $CancellablePromise<$models.PhotoBackupSource> {
     return $Call.ByID(225190247);
+}
+
+/**
+ * AddTransferBot stores a bot token for MTProto file transfer only.
+ */
+export function AddTransferBot(name: string, token: string): $CancellablePromise<auth$0.BotAccountInfo> {
+    return $Call.ByID(3870509489, name, token);
 }
 
 /**
@@ -288,6 +298,13 @@ export function ListResumableUploads(): $CancellablePromise<file$0.ResumableUplo
 }
 
 /**
+ * ListTransferBots returns configured MTProto bot senders without their tokens.
+ */
+export function ListTransferBots(): $CancellablePromise<auth$0.BotAccountInfo[] | null> {
+    return $Call.ByID(453381197);
+}
+
+/**
  * ListTrash returns everything still restorable, most recently deleted first.
  * 
  * It is a pure read: purging is the background sweep's job (trash_sweep.go)
@@ -456,6 +473,13 @@ export function ReleaseUploadSources(paths: string[] | null): $CancellablePromis
 
 export function RemovePhotoBackupSource(id: string): $CancellablePromise<void> {
     return $Call.ByID(818045651, id);
+}
+
+/**
+ * RemoveTransferBot removes a configured bot sender and its local session.
+ */
+export function RemoveTransferBot(id: string): $CancellablePromise<void> {
+    return $Call.ByID(3120312580, id);
 }
 
 export function RenameFile(msgID: number, newName: string): $CancellablePromise<$models.OperationResult> {

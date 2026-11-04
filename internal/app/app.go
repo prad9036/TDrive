@@ -12,6 +12,7 @@ import (
 
 	"TDrive/backend"
 	"TDrive/backend/applog"
+	coreauth "TDrive/backend/auth"
 	"TDrive/backend/core"
 	"TDrive/backend/datadir"
 	"TDrive/backend/galleryimage"
@@ -732,6 +733,30 @@ func (a *App) SendHint(hint string) {
 
 func (a *App) SubmitPassword(password string) {
 	a.authService().SubmitPassword(password)
+}
+
+// ListTransferBots returns configured MTProto bot senders without their tokens.
+func (a *App) ListTransferBots() ([]coreauth.BotAccountInfo, error) {
+	if err := a.WaitForBackendReady(a.appContext()); err != nil {
+		return nil, err
+	}
+	return a.engine.ListTransferBots()
+}
+
+// AddTransferBot stores a bot token for MTProto file transfer only.
+func (a *App) AddTransferBot(name, token string) (coreauth.BotAccountInfo, error) {
+	if err := a.WaitForBackendReady(a.appContext()); err != nil {
+		return coreauth.BotAccountInfo{}, err
+	}
+	return a.engine.AddTransferBot(a.appContext(), name, token)
+}
+
+// RemoveTransferBot removes a configured bot sender and its local session.
+func (a *App) RemoveTransferBot(id string) error {
+	if err := a.WaitForBackendReady(a.appContext()); err != nil {
+		return err
+	}
+	return a.engine.RemoveTransferBot(id)
 }
 
 func (a *App) CreateFolder(foldername string, parentID string) (backend.Folder, error) {

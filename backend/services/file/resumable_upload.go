@@ -58,6 +58,8 @@ type uploadJob struct {
 	HistoryBase int64
 	UploadTime  int64
 	ActorID     int64
+	SenderBotID string
+	SenderID    int64
 	Status      string
 	ManifestID  int64
 }
@@ -86,10 +88,18 @@ func (s *Service) ensureUploadJournal() error {
 			history_base INTEGER NOT NULL,
 			upload_time INTEGER NOT NULL,
 			actor_id INTEGER NOT NULL,
+			sender_bot_id TEXT NOT NULL DEFAULT '',
+			sender_id INTEGER NOT NULL DEFAULT 0,
 			status TEXT NOT NULL,
 			error TEXT NOT NULL DEFAULT '',
 			manifest_msg_id INTEGER NOT NULL DEFAULT 0
 		)`)
+		if s.resumeErr == nil {
+			s.resumeErr = ensureResumableUploadColumn(s.DB, "sender_bot_id", `ALTER TABLE resumable_uploads ADD COLUMN sender_bot_id TEXT NOT NULL DEFAULT ''`)
+		}
+		if s.resumeErr == nil {
+			s.resumeErr = ensureResumableUploadColumn(s.DB, "sender_id", `ALTER TABLE resumable_uploads ADD COLUMN sender_id INTEGER NOT NULL DEFAULT 0`)
+		}
 		if s.resumeErr == nil {
 			_, s.resumeErr = s.DB.Exec(`CREATE INDEX IF NOT EXISTS idx_resumable_uploads_channel
 				ON resumable_uploads(account_namespace, channel_id, status)`)
@@ -102,7 +112,32 @@ func (s *Service) ensureUploadJournal() error {
 	return s.resumeErr
 }
 
-func (s *Service) createUploadJob(ctx context.Context, path, name, parent string, size int64, channelID, actorID int64, plan uploadPartPlan, peer tgclient.InputPeer) (uploadJob, error) {
+func ensureResumableUploadColumn(db *sql.DB, column, alter string) error {
+	rows, err := db.Query(`PRAGMA table_info(resumable_uploads)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == column {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(alter)
+	return err
+}
+
+func (s *Service) createUploadJob(ctx context.Context, path, name, parent string, size int64, channelID, actorID int64, senderBotID string, senderID int64, plan uploadPartPlan, peer tgclient.InputPeer) (uploadJob, error) {
 	if actorID <= 0 || channelID == 0 {
 		return uploadJob{}, fmt.Errorf("upload account or channel is unavailable")
 	}
@@ -130,15 +165,15 @@ func (s *Service) createUploadJob(ctx context.Context, path, name, parent string
 		Path: path, Name: name, Parent: parent, Size: size, Hash: hash, PartHashes: partHashes,
 		ModTimeNS: info.ModTime().UnixNano(), PartSize: plan.partSize,
 		PartCount: plan.partCount, HistoryBase: base,
-		UploadTime: s.now().Unix(), ActorID: actorID, Status: resumePaused,
+		UploadTime: s.now().Unix(), ActorID: actorID, SenderBotID: senderBotID, SenderID: senderID, Status: resumePaused,
 	}
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO resumable_uploads
 		(job_id, channel_id, account_namespace, source_path, name, parent_id, source_size,
 		source_sha256, part_hashes_json, source_mtime_ns, part_size, part_count, history_base, upload_time,
-		actor_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		actor_id, sender_bot_id, sender_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.ChannelID, job.Namespace, job.Path, job.Name, job.Parent,
 		job.Size, job.Hash, string(partHashesJSON), job.ModTimeNS, job.PartSize, job.PartCount,
-		job.HistoryBase, job.UploadTime, job.ActorID, job.Status)
+		job.HistoryBase, job.UploadTime, job.ActorID, job.SenderBotID, job.SenderID, job.Status)
 	if err != nil {
 		return uploadJob{}, fmt.Errorf("save upload job: %w", err)
 	}
@@ -223,21 +258,40 @@ func (s *Service) loadUploadJob(ctx context.Context, jobID string) (uploadJob, e
 	var partHashesJSON string
 	err := s.DB.QueryRowContext(ctx, `SELECT job_id, channel_id, account_namespace, source_path,
 		name, parent_id, source_size, source_sha256, part_hashes_json, source_mtime_ns, part_size, part_count,
-		history_base, upload_time, actor_id, status, manifest_msg_id
+		history_base, upload_time, actor_id, sender_bot_id, sender_id, status, manifest_msg_id
 		FROM resumable_uploads WHERE job_id = ? AND account_namespace = ?`, jobID, s.CacheNamespace).Scan(
 		&job.ID, &job.ChannelID, &job.Namespace, &job.Path, &job.Name, &job.Parent,
 		&job.Size, &job.Hash, &partHashesJSON, &job.ModTimeNS, &job.PartSize, &job.PartCount,
-		&job.HistoryBase, &job.UploadTime, &job.ActorID, &job.Status, &job.ManifestID)
+		&job.HistoryBase, &job.UploadTime, &job.ActorID, &job.SenderBotID, &job.SenderID, &job.Status, &job.ManifestID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return uploadJob{}, fmt.Errorf("upload job not found")
 	}
 	if err != nil {
 		return uploadJob{}, fmt.Errorf("load upload job: %w", err)
 	}
+	if job.SenderID == 0 {
+		job.SenderID = job.ActorID
+	}
 	if err := json.Unmarshal([]byte(partHashesJSON), &job.PartHashes); err != nil || len(job.PartHashes) != job.PartCount {
 		return uploadJob{}, fmt.Errorf("invalid upload part hashes")
 	}
 	return job, nil
+}
+
+// HasRecoverableUploadsForBot prevents removing a sender needed to reconcile a
+// durable upload after a restart.
+func (s *Service) HasRecoverableUploadsForBot(ctx context.Context, botID string) (bool, error) {
+	if botID == "" {
+		return false, nil
+	}
+	if err := s.ensureUploadJournal(); err != nil {
+		return false, err
+	}
+	var exists int
+	err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM resumable_uploads
+		WHERE account_namespace = ? AND sender_bot_id = ? AND status <> ?)`,
+		s.CacheNamespace, botID, resumeComplete).Scan(&exists)
+	return exists != 0, err
 }
 
 func (s *Service) setUploadJobStatus(ctx context.Context, jobID, status, detail string) error {

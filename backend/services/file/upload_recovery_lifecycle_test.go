@@ -163,12 +163,12 @@ func TestStagedUploadSourceRetainedAcrossAccountsUntilEveryJobCompletes(t *testi
 	svc.CacheNamespace = "account-one"
 	path := writeTempFile(t, "eight123")
 	plan := uploadPartPlan{partSize: 4, partCount: 2}
-	first, err := svc.createUploadJob(t.Context(), path, "first.bin", projection.RootParent, 8, personalChannelID, 7, plan, tgclient.InputPeer{ChannelID: personalChannelID})
+	first, err := svc.createUploadJob(t.Context(), path, "first.bin", projection.RootParent, 8, personalChannelID, 7, "", 7, plan, tgclient.InputPeer{ChannelID: personalChannelID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	other := &Service{DB: db, TG: svc.TG, CacheNamespace: "account-two"}
-	second, err := other.createUploadJob(t.Context(), path, "second.bin", projection.RootParent, 8, sharedChannelID, 8, plan, tgclient.InputPeer{ChannelID: sharedChannelID})
+	second, err := other.createUploadJob(t.Context(), path, "second.bin", projection.RootParent, 8, sharedChannelID, 8, "", 8, plan, tgclient.InputPeer{ChannelID: sharedChannelID})
 	if err != nil {
 		t.Fatal(err)
 	}

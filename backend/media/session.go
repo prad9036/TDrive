@@ -47,8 +47,9 @@ type Session struct {
 
 	// ctx bounds work the session starts on its own behalf, such as warming
 	// the container index; Close cancels it.
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx     context.Context
+	cancel  context.CancelFunc
+	release func()
 
 	mu        sync.Mutex
 	lastTouch time.Time
@@ -75,6 +76,7 @@ type SessionOptions struct {
 	Context               context.Context
 	EnableVideoThumbnails bool
 	MasterKey             []byte
+	Release               func()
 }
 
 // warmContainerIndex speculatively pulls the last block of the file.
@@ -119,6 +121,7 @@ func newSession(file LogicalFile, segments []resolvedSegment, ranges tgclient.Ra
 		ctx:       ctx,
 		cancel:    cancel,
 		lastTouch: time.Now(),
+		release:   opts.Release,
 	}
 	// Playback and the thumbnail extractor share one block cache: the
 	// extractor reads the same head and index blocks playback already holds,
@@ -320,6 +323,8 @@ func (s *Session) Close() {
 	s.closed = true
 	clear(s.previewData)
 	s.previewData = nil
+	release := s.release
+	s.release = nil
 	s.mu.Unlock()
 	if s.cancel != nil {
 		s.cancel()
@@ -339,6 +344,9 @@ func (s *Session) Close() {
 	}
 	if s.thumbs != nil {
 		s.thumbs.Close()
+	}
+	if release != nil {
+		release()
 	}
 }
 
