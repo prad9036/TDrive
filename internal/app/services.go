@@ -104,6 +104,7 @@ func (a *App) activeChannelID() int64 {
 // that builds an App by hand, which keeps the two graphs identical.
 func (a *App) initServices(version string) {
 	a.device = &DeviceService{}
+	a.textShare = newTextShareService(a)
 	// App is passed twice: once as the host, once as the mount gate a key
 	// change has to hold. Both become MountService's job later.
 	a.encryption = newEncryptionService(a, a)
@@ -152,6 +153,7 @@ func (a *App) services() []application.Service {
 	return []application.Service{
 		application.NewService(a),
 		application.NewService(a.device),
+		application.NewService(a.textShare),
 		application.NewService(a.encryption),
 		application.NewService(a.drives),
 		application.NewService(a.media),

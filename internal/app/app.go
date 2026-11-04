@@ -91,6 +91,7 @@ type App struct {
 	// why startup orchestration stays here.
 	device     *DeviceService
 	drives     *DriveService
+	textShare  *TextShareService
 	encryption *EncryptionService
 	media      *MediaService
 	updates    *UpdateService

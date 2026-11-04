@@ -82,6 +82,7 @@
     import NewDriveModal from '../modals/NewDriveModal.svelte';
     import RenameModal from '../modals/RenameModal.svelte';
     import ShareDriveModal from '../modals/ShareDriveModal.svelte';
+    import ShareTextModal from '../modals/ShareTextModal.svelte';
     import FailedUploadsModal from '../modals/FailedUploadsModal.svelte';
     import UploadOptionsModal from '../modals/UploadOptionsModal.svelte';
     import TrashConfirmModal from '../trash/TrashConfirmModal.svelte';
@@ -198,6 +199,9 @@
     </div>
     <div id="share-drive-modal" class="modal-overlay" style="display: none;" aria-hidden="true">
         <ShareDriveModal />
+    </div>
+    <div id="share-text-modal" class="modal-overlay" style="display: none;" aria-hidden="true">
+        <ShareTextModal />
     </div>
     <div id="leave-drive-modal" class="modal-overlay" style="display: none;" aria-hidden="true">
         <LeaveDriveModal onConfirm={confirmLeaveDrive} />

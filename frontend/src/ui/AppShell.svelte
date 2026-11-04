@@ -4,6 +4,7 @@
     import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
     import ImagesIcon from '@lucide/svelte/icons/images';
     import Link2Icon from '@lucide/svelte/icons/link-2';
+    import MessageSquareTextIcon from '@lucide/svelte/icons/message-square-text';
     import SearchIcon from '@lucide/svelte/icons/search';
     import Trash2Icon from '@lucide/svelte/icons/trash-2';
     import { isMobilePlatform, listChannelSourceTopics, listChannelMedia, listMountableDrives } from '../api';
@@ -28,6 +29,7 @@
     import { clearSelection, openSelectedItemsDelete, openSelectedItemsDownload, openSelectedItemsMove } from '../modules/selection';
     import { chooseFilesForCurrentFolder, chooseFolderForCurrentFolder } from '../modules/transfers';
     import { openNewFolderModal } from '../modules/modals/folder';
+    import { openTextShareModal } from '../modules/modals/text-share';
     import {
         handleDriveClick,
         handlePendingClick,
@@ -177,6 +179,10 @@
             </div>
 
             <div class="drives-actions">
+                <button id="open-share-text" class="drive-action-btn" type="button" title="Save text to your Telegram Saved Messages draft" onclick={openTextShareModal}>
+                    <MessageSquareTextIcon class="icon" size={16} strokeWidth={2} aria-hidden="true" />
+                    Share text
+                </button>
                 <button id="open-new-drive" class="drive-action-btn" type="button" title="Create a new shared drive">
                     <FolderPlusIcon class="icon" size={16} strokeWidth={2} aria-hidden="true" />
                     New shared drive

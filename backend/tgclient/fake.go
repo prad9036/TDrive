@@ -29,6 +29,7 @@ type Fake struct {
 	sourceBodies   map[sourceBodyKey][]byte
 	sentControls   []SentControl
 	sentFiles      []SentFile
+	savedMessagesDraft string
 	deletedBatch   [][]int64
 	controlSends   map[sendDedupeKey]int64
 	fileSends      map[sendDedupeKey]SendFileResult
@@ -461,6 +462,19 @@ func (f *Fake) ResolveUsersFromMessages(ctx context.Context, peer InputPeer, ref
 
 func (f *Fake) SendControl(ctx context.Context, peer InputPeer, text string, silent bool) (int64, error) {
 	return f.SendControlWithRandomID(ctx, peer, text, silent, randomID())
+}
+
+func (f *Fake) SavedMessagesDraft(ctx context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.savedMessagesDraft, nil
+}
+
+func (f *Fake) SaveSavedMessagesDraft(ctx context.Context, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.savedMessagesDraft = text
+	return nil
 }
 
 func (f *Fake) SendControlWithRandomID(ctx context.Context, peer InputPeer, text string, silent bool, sendRandomID int64) (int64, error) {

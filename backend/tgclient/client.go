@@ -241,6 +241,11 @@ type Client interface {
 	// after a newline). Returns the new msgID.
 	SendControl(ctx context.Context, peer InputPeer, text string, silent bool) (msgID int64, err error)
 
+	// SavedMessagesDraft reads and writes the Telegram cloud draft for the
+	// account's Saved Messages dialog. It does not send a message.
+	SavedMessagesDraft(ctx context.Context) (string, error)
+	SaveSavedMessagesDraft(ctx context.Context, text string) error
+
 	// SendFile uploads and sends a document with the given caption. The
 	// caption is expected to start with a TDX1|t=f|... header. onProgress is
 	// optional; pass nil to skip progress callbacks.

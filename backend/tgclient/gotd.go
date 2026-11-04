@@ -282,6 +282,45 @@ func (g *Gotd) SendControlWithRandomID(ctx context.Context, peer InputPeer, text
 	return msgID, err
 }
 
+func (g *Gotd) SavedMessagesDraft(ctx context.Context) (string, error) {
+	var text string
+	err := g.run(ctx, func(ctx context.Context, api *tg.Client) error {
+		dialogs, err := api.MessagesGetPeerDialogs(ctx, []tg.InputDialogPeerClass{
+			&tg.InputDialogPeer{Peer: &tg.InputPeerSelf{}},
+		})
+		if err != nil {
+			return fmt.Errorf("get Saved Messages draft: %w", err)
+		}
+		for _, item := range dialogs.Dialogs {
+			dialog, ok := item.(*tg.Dialog)
+			if !ok {
+				continue
+			}
+			if draft, ok := dialog.Draft.(*tg.DraftMessage); ok {
+				text = draft.Message
+			}
+		}
+		return nil
+	})
+	return text, err
+}
+
+func (g *Gotd) SaveSavedMessagesDraft(ctx context.Context, text string) error {
+	return g.writes.Do(ctx, writeClassMessage, func() error {
+		return g.run(ctx, func(ctx context.Context, api *tg.Client) error {
+			_, err := api.MessagesSaveDraft(ctx, &tg.MessagesSaveDraftRequest{
+				Peer:      &tg.InputPeerSelf{},
+				Message:   text,
+				NoWebpage: true,
+			})
+			if err != nil {
+				return fmt.Errorf("save Saved Messages draft: %w", err)
+			}
+			return nil
+		})
+	})
+}
+
 func (g *Gotd) SendFile(ctx context.Context, peer InputPeer, r io.Reader, name, caption string, totalSize int64, onProgress func(sent, total int64)) (SendFileResult, error) {
 	return g.SendFileWithRandomID(ctx, peer, r, name, caption, totalSize, onProgress, randomID())
 }

@@ -15,6 +15,7 @@ export * from "./api/session";
 export * from "./api/updates";
 export * from "./api/channel-sources";
 export * from "./api/biometric";
+export * from "./api/text-share";
 
 export type {
     DownloadResult,
