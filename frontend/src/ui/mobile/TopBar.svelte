@@ -18,6 +18,7 @@
     import { selectionBarState } from '../selection/selection-bar-store';
     import { sidebarState } from '../sidebar/sidebar-store';
     import { askEmptyTrash, closeTrash, openTrash, trashEntries } from '../../modules/trash/controller';
+    import { p2pTransferOpen } from '../modals/p2p-transfer-store';
     import SyncRing from './SyncRing.svelte';
     import {
         ACCOUNT_DETAIL_TITLES,
@@ -145,11 +146,12 @@
 
     // The overflow menu carries the sort radios and, under them, the actions a
     // phone has nowhere else to reach: Select (multi-select starts on a long
-    // press otherwise), Refresh (a pull otherwise) and the drive's Trash.
+    // press otherwise), Refresh (a pull otherwise), Trash and direct transfer.
     const menuActions: Array<{ label: string; run: () => void }> = [
         { label: 'Select', run: () => { startSelectionMode(); closeSort(); } },
         { label: 'Refresh', run: () => { void appActions().triggerRefresh(); closeSort(); } },
         { label: 'Trash', run: () => { openTrash(); closeSort(); } },
+        { label: 'Direct transfer', run: () => { closeSort(); p2pTransferOpen.set(true); } },
     ];
 
     function menuItems(): HTMLButtonElement[] {

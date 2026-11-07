@@ -137,6 +137,17 @@ wails3 task android:run:device
 wails3 task android:package ARCH=arm64
 ```
 
+To install a locally signed test build beside an existing release install,
+give it a distinct application ID and label. This creates separate app data;
+it does not migrate data from the release package:
+
+```bash
+ANDROID_APPLICATION_ID=com.jeetraj.tdrive.dev \
+ANDROID_APP_NAME="TDrive Test" \
+wails3 task android:package ARCH=arm64
+adb install build/bin/TDrive.apk
+```
+
 ### iOS
 
 Use macOS with full Xcode and the iOS SDK installed. TDrive targets iOS 16 or newer.

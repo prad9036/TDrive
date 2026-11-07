@@ -48,10 +48,26 @@ export function AddTransferBot(name: string, token: string): $CancellablePromise
 }
 
 /**
+ * BeginP2PReceive opens a private temporary destination for a direct transfer.
+ * Chunks are written there as they arrive, so a large receive does not have to
+ * be retained in the WebView's memory.
+ */
+export function BeginP2PReceive(name: string, size: number): $CancellablePromise<string> {
+    return $Call.ByID(2466381310, name, size);
+}
+
+/**
  * CancelDownload cancels the active download.
  */
 export function CancelDownload(): $CancellablePromise<void> {
     return $Call.ByID(4033939734);
+}
+
+/**
+ * CancelP2PReceive abandons an incomplete peer receive and removes its staging file.
+ */
+export function CancelP2PReceive(token: string): $CancellablePromise<void> {
+    return $Call.ByID(2134737173, token);
 }
 
 /**
@@ -168,6 +184,14 @@ export function EmptyTrash(): $CancellablePromise<$models.OperationResult> {
 
 export function EnqueuePhotoBackupAssets(sourceID: string, values: $models.PhotoBackupAsset[] | null): $CancellablePromise<number> {
     return $Call.ByID(1336452721, sourceID, values);
+}
+
+/**
+ * FinishP2PReceive publishes a complete temporary receive through the
+ * platform's normal save path (desktop dialog or mobile Downloads directory).
+ */
+export function FinishP2PReceive(token: string): $CancellablePromise<string> {
+    return $Call.ByID(1071224760, token);
 }
 
 /**
@@ -669,4 +693,11 @@ export function UpsertPhotoBackupSource(value: $models.PhotoBackupSource): $Canc
  */
 export function WaitForBackendReady(): $CancellablePromise<void> {
     return $Call.ByID(3991527335);
+}
+
+/**
+ * WriteP2PReceiveChunk appends one bounded base64 chunk to its active receive.
+ */
+export function WriteP2PReceiveChunk(token: string, encoded: string): $CancellablePromise<void> {
+    return $Call.ByID(3264650645, token, encoded);
 }

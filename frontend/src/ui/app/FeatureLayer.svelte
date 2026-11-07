@@ -84,6 +84,7 @@
     import RenameModal from '../modals/RenameModal.svelte';
     import ShareDriveModal from '../modals/ShareDriveModal.svelte';
     import ShareTextModal from '../modals/ShareTextModal.svelte';
+    import P2PTransferModal from '../modals/P2PTransferModal.svelte';
     import FailedUploadsModal from '../modals/FailedUploadsModal.svelte';
     import UploadOptionsModal from '../modals/UploadOptionsModal.svelte';
     import TrashConfirmModal from '../trash/TrashConfirmModal.svelte';
@@ -207,6 +208,9 @@
             onRetry={retryLoadSavedMessagesDraft}
             onSave={submitSavedMessagesDraft}
         />
+    </div>
+    <div id="p2p-transfer-modal" class="modal-overlay" style="display: none;" aria-hidden="true">
+        <P2PTransferModal />
     </div>
     <div id="leave-drive-modal" class="modal-overlay" style="display: none;" aria-hidden="true">
         <LeaveDriveModal onConfirm={confirmLeaveDrive} />

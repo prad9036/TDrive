@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo="${GITHUB_REPOSITORY:-jeetrex17/TDrive}"
+repo="${GITHUB_REPOSITORY:-prad9036/TDrive}"
 tag="${1:-}"
 
 if ! command -v gh >/dev/null 2>&1; then

@@ -96,11 +96,18 @@ func main() {
 		fmt.Printf("✓ Android NDK: %s\n", ndkHome)
 	}
 
-	// Check Java
+	// Check the Java runtime and compiler. Gradle's Java toolchain requires
+	// javac; a JRE alone passes a java -version check but cannot compile the
+	// Android host sources.
 	if !checkCommand("java", "-version") {
-		errors = append(errors, "Java not found. Install JDK 11+ (OpenJDK recommended)")
+		errors = append(errors, "Java not found. Install JDK 21 (OpenJDK recommended)")
 	} else {
-		fmt.Println("✓ Java is installed")
+		fmt.Println("✓ Java runtime is installed")
+	}
+	if !checkCommand("javac", "-version") {
+		errors = append(errors, "javac not found. Install a full JDK 21 (for Debian/Ubuntu: sudo apt-get install openjdk-21-jdk); a JRE is not enough")
+	} else {
+		fmt.Println("✓ Java compiler (javac) is installed")
 	}
 
 	// Check for AVD (Android Virtual Device)

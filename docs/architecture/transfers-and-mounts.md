@@ -135,6 +135,35 @@ writes, or TDrive control messages. Durable mounted writes and rendition
 preparation still use the primary account because their receipt and cleanup
 journals do not yet persist a transfer-bot identity.
 
+## Direct WebRTC transfers
+
+The Direct transfer surface first establishes an ordered WebRTC data channel;
+file selection happens only after both peers are connected. Either peer can send
+a batch of up to 500 files, and both peers can exchange batches over the same
+connection. Files are sent sequentially in 64 KiB chunks, with a receiver
+acknowledgement for each chunk and each completed file. The sender gathers ICE
+candidates before creating a temporary offer.
+For devices on the same Telegram account, the offer and answer are stored as a
+`TDRIVE-P2P:` line in the Saved Messages draft; ordinary draft text is retained.
+For other peers, the same base64 share code can be copied between devices. A
+connection invite expires after ten minutes and its draft line is removed after
+completion. Drafts are polled while an offer is pending because the Telegram
+client boundary exposes read/write operations rather than draft-update events.
+
+The peer data path keeps one native staging file open at a time and publishes
+each completed file using the regular desktop save dialog or the mobile
+Downloads directory. Completed files remain saved if a later file in the batch
+fails; the incomplete current file is discarded when the connection closes.
+Transfers do not create Telegram messages, TDrive records, resumable jobs or a
+transfer journal. Closing either side interrupts the connection and loses
+incomplete bytes.
+
+ICE uses a public STUN service for server-reflexive candidates and has no TURN
+relay. WebRTC encrypts the peer data channel, but direct connectivity is not
+guaranteed: symmetric NAT, carrier-grade NAT, restrictive firewalls or blocked
+STUN can prevent peers from connecting. In that case a relay service is needed;
+TDrive does not silently upload the file through Telegram as a fallback.
+
 ## Interactive upload queue and Activity
 
 The frontend's [upload queue](../../frontend/src/modules/upload-queue.ts)

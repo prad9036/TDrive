@@ -84,6 +84,8 @@ type App struct {
 	// macOS does not intercept the in-app HTML5 drag.
 	fileDropMu      sync.Mutex
 	fileDropEnabled bool
+	p2pReceiveMu    sync.Mutex
+	p2pReceives     map[string]*p2pReceiveFile
 
 	transfers transferState
 
@@ -790,6 +792,7 @@ func (a *App) createFolder(foldername string, parentID string, channelID int64) 
 // ServiceShutdown runs on app exit. Tear down the shared Telegram connection
 // so the background Run scope's goroutine exits cleanly.
 func (a *App) ServiceShutdown() error {
+	a.closeP2PReceives()
 	a.encryption.cancelBiometricAttempt()
 	a.backendStartupMu.Lock()
 	a.backendStopped = true

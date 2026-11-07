@@ -5,6 +5,7 @@
     import ImagesIcon from '@lucide/svelte/icons/images';
     import Link2Icon from '@lucide/svelte/icons/link-2';
     import MessageSquareTextIcon from '@lucide/svelte/icons/message-square-text';
+    import Share2Icon from '@lucide/svelte/icons/share-2';
     import SearchIcon from '@lucide/svelte/icons/search';
     import Trash2Icon from '@lucide/svelte/icons/trash-2';
     import { isMobilePlatform, listChannelSourceTopics, listChannelMedia, listMountableDrives } from '../api';
@@ -30,6 +31,7 @@
     import { chooseFilesForCurrentFolder, chooseFolderForCurrentFolder } from '../modules/transfers';
     import { openNewFolderModal } from '../modules/modals/folder';
     import { openTextShareModal } from '../modules/modals/text-share';
+    import { p2pTransferOpen } from './modals/p2p-transfer-store';
     import {
         handleDriveClick,
         handlePendingClick,
@@ -179,6 +181,10 @@
             </div>
 
             <div class="drives-actions">
+                <button id="open-p2p-transfer" class="drive-action-btn" type="button" title="Transfer a file directly between devices" onclick={() => p2pTransferOpen.set(true)}>
+                    <Share2Icon class="icon" size={16} strokeWidth={2} aria-hidden="true" />
+                    Direct transfer
+                </button>
                 <button id="open-share-text" class="drive-action-btn" type="button" title="Save text to your Telegram Saved Messages draft" onclick={openTextShareModal}>
                     <MessageSquareTextIcon class="icon" size={16} strokeWidth={2} aria-hidden="true" />
                     Share text

@@ -29,6 +29,7 @@ var cacheTempPrefixes = [...]string{
 	".tdrive-upload-part-",
 	"tdrive-enc-",
 	"tdrive-mountdav-put-",
+	"tdrive-p2p-",
 }
 
 var (
