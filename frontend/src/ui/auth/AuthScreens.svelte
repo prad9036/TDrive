@@ -21,9 +21,9 @@
     } from './auth-store';
     import { personalDriveSetup } from './personal-drive-store';
     import PersonalDriveSetup from './PersonalDriveSetup.svelte';
-    import { installUpdate, openReleasePage } from '../../modules/updates';
+    import { checkForUpdates, installUpdate, openReleasePage } from '../../modules/updates';
     import { isVersionSkipped } from '../updates/update-model';
-    import { updatePrefs, updateState } from '../updates/update-store';
+    import { appVersionInfo, updatePrefs, updateState } from '../updates/update-store';
 
     interface Props {
         onSetup: (apiId: string, apiHash: string) => void | Promise<void>;
@@ -145,11 +145,14 @@
 
 </script>
 
-{#if $authScreen && updateFooter}
+{#if $authScreen && !mobile && !$appVersionInfo?.devBuild && !$appVersionInfo?.storeManaged}
     <div class="auth-update-footer">
-        <button type="button" onclick={() => void updateFooter.action()}>
-            TDrive <span class="auth-update-accent">{updateFooter.version}</span> · {updateFooter.label}
-        </button>
+        {#if updateFooter}
+            <button type="button" onclick={() => void updateFooter.action()}>
+                TDrive <span class="auth-update-accent">{updateFooter.version}</span> · {updateFooter.label}
+            </button>
+        {/if}
+        <button type="button" onclick={() => void checkForUpdates({ explicit: true })}>Check for updates</button>
     </div>
 {/if}
 

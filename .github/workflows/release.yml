@@ -54,6 +54,12 @@ jobs:
           - os: windows-latest
             platform: windows/amd64
 
+          # Cross-compile the app binary on Windows amd64. The updater payload
+          # contains only TDrive.exe so an existing ARM64 install keeps its
+          # matching local media runtime.
+          - os: windows-latest
+            platform: windows/arm64
+
           - os: macos-15
             platform: darwin/arm64
 
@@ -107,6 +113,7 @@ jobs:
       # are set and the runner's package-manager mpv otherwise; the bundle
       # manifest records which one shipped. Keep in sync with ci.yml.
       - name: Prepare media runtime
+        if: matrix.platform != 'windows/arm64'
         shell: bash
         env:
           TDRIVE_LINUX_MPV_RUNTIME_URL: ${{ vars.TDRIVE_LINUX_MPV_RUNTIME_URL }}
@@ -155,6 +162,8 @@ jobs:
           set -euo pipefail
           if [ "$RUNNER_OS" = "macOS" ]; then
             wails3 task package VERSION="$TDRIVE_ARTIFACT_VERSION"
+          elif [ "${{ matrix.platform }}" = "windows/arm64" ]; then
+            wails3 task windows:build VERSION="$TDRIVE_ARTIFACT_VERSION" ARCH=arm64
           else
             wails3 task build VERSION="$TDRIVE_ARTIFACT_VERSION"
           fi
@@ -196,7 +205,7 @@ jobs:
       # The runner image has no NSIS; the Chocolatey package installs under
       # Program Files (x86) without touching PATH. Keep in sync with ci.yml.
       - name: Install NSIS
-        if: runner.os == 'Windows'
+        if: matrix.platform == 'windows/amd64'
         shell: pwsh
         run: |
           $nsis = Join-Path ${env:ProgramFiles(x86)} "NSIS"
@@ -208,7 +217,7 @@ jobs:
           & (Join-Path $nsis "makensis.exe") /VERSION
 
       - name: Package (Windows)
-        if: runner.os == 'Windows'
+        if: matrix.platform == 'windows/amd64'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
@@ -224,8 +233,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "windows installer build failed" }
           Move-Item -Force "build/bin/TDrive-amd64-installer.exe" "dist/TDrive-$env:TDRIVE_ARTIFACT_VERSION-windows-amd64-setup.exe"
 
+      - name: Package Windows ARM64 updater payload
+        if: matrix.platform == 'windows/arm64'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Force -LiteralPath "build/bin/TDrive.exe" -DestinationPath "dist/TDrive-$env:TDRIVE_ARTIFACT_VERSION-windows-arm64.zip"
+
       - name: Package CLI (Windows)
-        if: runner.os == 'Windows'
+        if: matrix.platform == 'windows/amd64'
         shell: pwsh
         run: ./scripts/package-cli-release-windows.ps1 -Version $env:TDRIVE_ARTIFACT_VERSION
 

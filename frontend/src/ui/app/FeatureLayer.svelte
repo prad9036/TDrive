@@ -101,6 +101,9 @@
     import FeaturePortal from './FeaturePortal.svelte';
 
     $effect(() => activateNotificationEffects());
+    // The updater is app-wide: start its GitHub check during the login screen
+    // too, rather than waiting for the user to reach the dashboard.
+    $effect(() => activateUpdates());
 
     $effect(() => {
         if ($appView.kind !== 'dashboard') return;
@@ -120,7 +123,6 @@
             activateFolderShortcuts(),
             activateConnectivityWatch(),
             activateLiveSyncEvents(),
-            activateUpdates(),
             activateChannelSources(),
         ];
         let previewActivationCancelled = false;

@@ -28,14 +28,10 @@ import {
     updateState,
 } from '../ui/updates/update-store';
 
-// Silent background cadence. The first check trails dashboard bring-up so it
-// never competes with the initial Telegram sync; then once a day, because a
-// drive app is commonly left running for days at a time.
-const FIRST_CHECK_DELAY_MS = 10_000;
+// Check when the desktop app shell is ready, then once a day while it stays open.
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 let started = false;
-let firstCheckTimer: ReturnType<typeof setTimeout> | null = null;
 let intervalTimer: ReturnType<typeof setInterval> | null = null;
 let stopUpdateState: (() => void) | null = null;
 let stopOpenUpdates: (() => void) | null = null;
@@ -71,13 +67,11 @@ export function activateUpdates(): () => void {
 }
 
 export function teardownUpdates(): void {
-    if (firstCheckTimer) clearTimeout(firstCheckTimer);
     if (intervalTimer) clearInterval(intervalTimer);
     stopUpdateState?.();
     stopOpenUpdates?.();
     stopUpdateState = null;
     stopOpenUpdates = null;
-    firstCheckTimer = null;
     intervalTimer = null;
     versionReady = null;
     started = false;
@@ -95,9 +89,7 @@ async function hydrateVersion(): Promise<void> {
 function scheduleChecks(): void {
     const info = get(appVersionInfo);
     if (info?.devBuild || info?.storeManaged) return;
-    firstCheckTimer = setTimeout(() => {
-        void checkForUpdates();
-    }, FIRST_CHECK_DELAY_MS);
+    void checkForUpdates();
     intervalTimer = setInterval(() => {
         void checkForUpdates();
     }, CHECK_INTERVAL_MS);

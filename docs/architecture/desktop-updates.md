@@ -18,7 +18,10 @@ retain the existing update path. See the
 The service asks the [GitHub source](../../backend/updater/github.go) for a
 release and compares versions using [semantic version parsing](../../backend/updater/version.go).
 A development version that cannot be parsed disables the updater. Initialization
-does not itself start network discovery; the frontend owns the check schedule.
+does not itself start network discovery; the desktop frontend checks as soon as
+the app shell has initialized, including while the login screen is shown, and
+rechecks once a day while the app remains open. Users can also start a check
+from the account menu or login screen.
 
 Asset selection uses exact names from [platform.go](../../backend/updater/platform.go),
 so similarly named CLI archives cannot be selected as desktop payloads.
@@ -27,12 +30,21 @@ so similarly named CLI archives cannot be selected as desktop payloads.
 | --- | --- |
 | macOS arm64 | `TDrive-TAG-macos-arm64.zip` |
 | Windows amd64 | `TDrive-TAG-windows-amd64.zip` |
+| Windows arm64 | `TDrive-TAG-windows-arm64.zip` |
 | Linux amd64 | `TDrive-TAG-x86_64.AppImage` |
 
 Linux also accepts the older `TDrive-TAG-linux-amd64.AppImage` name when the new
 name is absent. Unsupported platforms and missing assets leave the release
 visible with a manual-install hint. Automatic installation also needs a writable
 installation parent and an available private update cache.
+
+Desktop update assets belong in the **Assets** section of a published release
+in [`jeetrex17/TDrive`](https://github.com/jeetrex17/TDrive/releases), not in a
+source folder. The release workflow uploads the platform payloads together with
+`checksums.txt` and `checksums.txt.sig`; the updater only downloads a payload
+when its exact asset name has a digest in that signed manifest. Android APKs
+are published there for manual installation, while mobile builds do not use the
+desktop updater.
 
 ```mermaid
 flowchart TD

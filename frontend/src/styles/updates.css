@@ -30,6 +30,7 @@
     right: 0;
     bottom: 16px;
     display: flex;
+    gap: 8px;
     justify-content: center;
     z-index: var(--z-popover);
 }

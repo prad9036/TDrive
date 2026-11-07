@@ -30,6 +30,8 @@ func assetSuffix(p Platform) (string, bool) {
 		return "macos-arm64.zip", true
 	case Platform{OS: "windows", Arch: "amd64"}:
 		return "windows-amd64.zip", true
+	case Platform{OS: "windows", Arch: "arm64"}:
+		return "windows-arm64.zip", true
 	case Platform{OS: "linux", Arch: "amd64"}:
 		return "x86_64.AppImage", true
 	}
